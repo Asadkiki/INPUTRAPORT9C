@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aplikasi Input Raport 9C (Google Sheets)</title>
+    
+    <!-- External CSS & JavaScript Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+    <style>
+        /* Custom scrollbars */
+        ::-webkit-scrollbar { height: 8px; width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+
+        /* Custom styling for print mode */
+        @media print {
+            body { background: white !important; color: black !important; }
+            .no-print { display: none !important; }
+            #print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; padding: 10mm; }
+            
+            /* Remove input styling during print */
+            input.print-input {
+                border: none !important;
+                background: transparent !important;
+                outline: none !important;
+                box-shadow: none !important;
+                text-align: center !important;
+                -moz-appearance: textfield;
+            }
+            input.print-input::-webkit-outer-spin-button,
+            input.print-input::-webkit-inner-spin-button {
+                -webkit-appearance: none;
+                margin: 0;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, Fragment } = React;
+
+        /* Web App URL Google Apps Script */
+        const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzp7sWD1FIA8jRsP_nLfghmKk86iwuMniiZpPzav70mp97ltzx0MF_QNSMzSGkg9drS/exec";
+
+        /* List Mata Pelajaran */
+        const SUBJECTS = [
+            'Pendidikan Pancasila', 'Bahasa Indonesia', 'Matematika', 'PJOK', 'IPS', 'Bahasa Inggris', 
+            'IPA', 'Prakarya', 'PAI', 'PAK', 'Bahasa Lampung', 'Informatika'
+        ];
+
+        /* Pemetaan Resmi Raport */
+        const OFFICIAL_SUBJECT_MAP = [
+            { no: '1', label: 'Pendidikan Agama dan Budi Pekerti', key: 'PAI' },
+            { no: '2', label: 'Pendidikan Pancasila dan Kewarganegaraan', key: 'Pendidikan Pancasila' },
+            { no: '3', label: 'Bahasa Indonesia', key: 'Bahasa Indonesia' },
+            { no: '4', label: 'Matematika', key: 'Matematika' },
+            { no: '5', label: 'Ilmu Pengetahuan Alam', key: 'IPA' },
+            { no: '6', label: 'Ilmu Pengetahuan Sosial', key: 'IPS' },
+            { no: '7', label: 'Bahasa Inggris', key: 'Bahasa Inggris' },
+            { no: '8', label: 'Pend Jasmani Olah Raga dan Kesehatan', key: 'PJOK' },
+            { no: '9', label: 'Informatika', key: 'Informatika' },
+            { no: '10', label: 'Seni Budaya & Prakarya', key: 'Prakarya' },
+            { no: '11', label: 'Muatan Lokal', isHeader: true },
+            { no: '', label: 'a. Bahasa Lampung', key: 'Bahasa Lampung', isSub: true },
+            { no: '', label: 'b. Pendidikan Anti Korupsi', key: 'PAK', isSub: true }
+        ];
+
+        /* Daftar Nama Siswa 9C */
+        const STUDENTS = [
+            "AISYAH PIJI SHALSABILA", "AULIA KHAIRUNISA", "AWALIA JULIYANTI", "DANU RAMADAN", 
+            "DEVAN ALFARIKI", "FERDIANSYAH", "JIHAN AULIA", "KAISAR EFENDI", "M.FATIR", 
+            "MARCELYANTI MANDALA PUTRI", "MARIO SAPUTRA", "MARSHELA OCTAVIA", "MAULANA PRATAMA", 
+            "MUHAMMAD ALIF", "MUHAMMAD FADILAH", "MUHAMMAD FARREL", "MUHAMMAD SULTON", 
+            "NAUFAL RHAMADAN", "NAZWA CHAIRUNISSA", "NIRWASITA PUTRINA AZZAHRA", "RADITIA RAMADHAN", 
+            "RAISYA KURNIA DARMAWAN", "RATNA ANTIKA", "RINDI YANI SAPUTRI", "RISKI PRATAMA", "TASYA PERMATA SARI"
+        ];
+
+        const PASSWORD_ADMIN = "admin123";
+
+        const Icons = {
+            Table: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18"></path><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path></svg>,
+            Lock: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>,
+            LogOut: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>,
+            Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>,
+            Printer: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>,
+            Sheet: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><line x1="10" y1="9" x2="10" y2="9"></line></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
+            Upload: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        };
+
+        function App() {
+            const scriptUrl = DEFAULT_SCRIPT_URL;
+            const [selectedSubject, setSelectedSubject] = useState(SUBJECTS[0]);
+            const [gradesData, setGradesData] = useState({});
+            const [loading, setLoading] = useState(false);
+            const [savingStatus, setSavingStatus] = useState('idle');
+            const [isAdminMode, setIsAdminMode] = useState(false);
+
+            // State Modal dan Cetak
+            const [showAuthModal, setShowAuthModal] = useState(false);
+            const [passwordInput, setPasswordInput] = useState('');
+            const [passwordError, setPasswordError] = useState('');
+            const [selectedStudentForPrint, setSelectedStudentForPrint] = useState(null);
+
+            // State Logo Custom
+            const [logoKotaUrl, setLogoKotaUrl] = useState(null);
+            const [logoSekolahUrl, setLogoSekolahUrl] = useState(null);
+
+            // State Kehadiran (Sakit, Izin, Alpa) per siswa
+            const [attendanceData, setAttendanceData] = useState({});
+
+            const fetchData = useCallback(async () => {
+                if (!scriptUrl) return;
+                setLoading(true);
+                try {
+                    const res = await fetch(scriptUrl);
+                    if (!res.ok) throw new Error("Gagal terhubung ke Google Sheets");
+                    const data = await res.json();
+                    
+                    const parsedData = {};
+                    if (Array.isArray(data) && data.length > 1) {
+                        for (let i = 1; i < data.length; i++) {
+                            const [student, subject, ph1, ph2, pts] = data[i];
+                            if (!student || !subject) continue;
+                            if (!parsedData[student]) parsedData[student] = {};
+                            parsedData[student][subject] = {
+                                PH1: ph1 !== undefined && ph1 !== null ? ph1 : '',
+                                PH2: ph2 !== undefined && ph2 !== null ? ph2 : '',
+                                PTS: pts !== undefined && pts !== null ? pts : ''
+                            };
+                        }
+                    }
+                    setGradesData(parsedData);
+                } catch (err) {
+                    console.error("Error loading data:", err);
+                } finally {
+                    setLoading(false);
+                }
+            }, [scriptUrl]);
+
+            useEffect(() => {
+                fetchData();
+            }, [fetchData]);
+
+            // Handler perubahan nilai
+            const handleGradeChange = (student, type, value) => {
+                setSavingStatus('idle');
+                let parsedValue = value;
+                if (value !== '') {
+                    const num = Number(value);
+                    if (isNaN(num)) return;
+                    if (num < 0) parsedValue = 0;
+                    if (num > 100) parsedValue = 100;
+                }
+
+                setGradesData(prev => ({
+                    ...prev,
+                    [student]: {
+                        ...prev[student],
+                        [selectedSubject]: {
+                            ...prev[student]?.[selectedSubject],
+                            [type]: parsedValue
+                        }
+                    }
+                }));
+            };
+
+            const getGradeValue = (student, subject, type) => {
+                return gradesData[student]?.[subject]?.[type] ?? '';
+            };
+
+            // Handler Perubahan Data Kehadiran
+            const handleAttendanceChange = (student, type, value) => {
+                setAttendanceData(prev => ({
+                    ...prev,
+                    [student]: {
+                        ...prev[student],
+                        [type]: value
+                    }
+                }));
+            };
+
+            const getAttendanceValue = (student, type) => {
+                return attendanceData[student]?.[type] ?? '';
+            };
+
+            // Handler Upload Gambar Logo
+            const handleImageUpload = (event, setLogoState) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        setLogoState(e.target.result);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleSaveAll = async () => {
+                if (!scriptUrl) {
+                    setSavingStatus('no-url');
+                    return;
+                }
+
+                setSavingStatus('saving');
+
+                const payloadGrades = STUDENTS.map(student => ({
+                    student,
+                    PH1: getGradeValue(student, selectedSubject, 'PH1'),
+                    PH2: getGradeValue(student, selectedSubject, 'PH2'),
+                    PTS: getGradeValue(student, selectedSubject, 'PTS')
+                }));
+
+                try {
+                    await fetch(scriptUrl, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'bulk_save',
+                            subject: selectedSubject,
+                            grades: payloadGrades
+                        })
+                    });
+
+                    setSavingStatus('saved');
+                    setTimeout(() => setSavingStatus('idle'), 4000);
+                } catch (err) {
+                    console.error("Save error:", err);
+                    setSavingStatus('error');
+                }
+            };
+
+            const exportToExcel = () => {
+                if (!window.XLSX) return;
+
+                const ws_data = [
+                    ["NAMA SISWA", ...SUBJECTS.flatMap(s => [s.toUpperCase(), "", ""])],
+                    ["", ...SUBJECTS.flatMap(() => ["PH 1", "PH 2", "PTS"])],
+                    ...STUDENTS.map(student => [
+                        student,
+                        ...SUBJECTS.flatMap(subject => {
+                            const ph1 = getGradeValue(student, subject, 'PH1');
+                            const ph2 = getGradeValue(student, subject, 'PH2');
+                            const pts = getGradeValue(student, subject, 'PTS');
+                            return [
+                                ph1 !== '' ? Number(ph1) : '',
+                                ph2 !== '' ? Number(ph2) : '',
+                                pts !== '' ? Number(pts) : ''
+                            ];
+                        })
+                    ])
+                ];
+
+                const worksheet = window.XLSX.utils.aoa_to_sheet(ws_data);
+
+                const merges = [
+                    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }
+                ];
+
+                SUBJECTS.forEach((_, idx) => {
+                    const startCol = 1 + idx * 3;
+                    merges.push({
+                        s: { r: 0, c: startCol },
+                        e: { r: 0, c: startCol + 2 }
+                    });
+                });
+
+                worksheet['!merges'] = merges;
+                worksheet['!cols'] = [
+                    { wch: 32 },
+                    ...SUBJECTS.flatMap(() => [{ wch: 8 }, { wch: 8 }, { wch: 8 }])
+                ];
+
+                const workbook = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(workbook, worksheet, "Master Rekap 9C");
+                window.XLSX.writeFile(workbook, "Master_Raport_9C.xlsx");
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col bg-slate-100 font-sans">
+                    
+                    {/* Header App Bar */}
+                    <header className="bg-emerald-700 text-white shadow-md no-print sticky top-0 z-40">
+                        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-emerald-800 p-2 rounded-xl">
+                                    <Icons.Sheet />
+                                </div>
+                                <div>
+                                    <h1 className="font-bold text-lg leading-tight">Aplikasi Raport 9C</h1>
+                                    <p className="text-xs text-emerald-100">SMP Negeri 38 Bandar Lampung</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                {isAdminMode ? (
+                                    <>
+                                        <button 
+                                            onClick={exportToExcel}
+                                            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg font-bold text-xs flex items-center gap-1.5 transition shadow"
+                                        >
+                                            <Icons.Download /> Unduh Excel (.xlsx)
+                                        </button>
+                                        <button 
+                                            onClick={() => setIsAdminMode(false)}
+                                            className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition"
+                                        >
+                                            <Icons.LogOut /> Kembali ke Mode Guru
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button 
+                                        onClick={() => setShowAuthModal(true)}
+                                        className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition border border-emerald-600"
+                                    >
+                                        <Icons.Lock /> Master Rekap / Admin
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Sub-header Controls */}
+                    {!isAdminMode && (
+                        <div className="bg-white border-b border-slate-200 shadow-sm no-print sticky top-[57px] z-30">
+                            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+                                <div className="flex items-center gap-3 w-full sm:w-auto">
+                                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">Mata Pelajaran:</label>
+                                    <select 
+                                        className="bg-slate-50 border border-slate-300 font-bold text-slate-800 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-none transition w-full sm:w-64"
+                                        value={selectedSubject}
+                                        onChange={(e) => {
+                                            setSelectedSubject(e.target.value);
+                                            setSavingStatus('idle');
+                                        }}
+                                    >
+                                        {SUBJECTS.map(subj => (
+                                            <option key={subj} value={subj}>{subj}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={fetchData}
+                                        disabled={loading}
+                                        className="px-3 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+                                    >
+                                        {loading ? 'Sikronisasi...' : 'Muat Ulang Data'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    <main className="flex-1 max-w-7xl w-full mx-auto p-3 md:p-6 no-print">
+                        {loading ? (
+                            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl shadow-sm border border-slate-200">
+                                <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+                                <p className="text-slate-600 font-semibold text-sm">Memuat data dari Google Sheets...</p>
+                            </div>
+                        ) : !isAdminMode ? (
+                            
+                            /* MODE INPUT GURU */
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse min-w-[600px]">
+                                        <thead className="bg-slate-50 border-b border-slate-200">
+                                            <tr>
+                                                <th className="py-3.5 px-4 md:px-6 font-bold text-slate-700 text-sm md:text-base sticky left-0 bg-slate-50 z-20">NAMA SISWA</th>
+                                                <th className="py-3.5 px-2 md:px-4 font-bold text-emerald-800 w-24 md:w-32 text-center bg-emerald-50/60">PH 1</th>
+                                                <th className="py-3.5 px-2 md:px-4 font-bold text-emerald-800 w-24 md:w-32 text-center bg-emerald-50/60">PH 2</th>
+                                                <th className="py-3.5 px-2 md:px-4 font-bold text-teal-800 w-24 md:w-32 text-center bg-teal-50/60">PTS</th>
+                                                <th className="py-3.5 px-2 md:px-4 font-bold text-slate-700 w-28 text-center">STATUS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {STUDENTS.map((student, idx) => (
+                                                <tr key={student} className="hover:bg-emerald-50/30 transition-colors">
+                                                    <td className={`py-3 px-4 md:px-6 font-semibold text-slate-800 text-sm md:text-base sticky left-0 z-10 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                                                        {student}
+                                                    </td>
+                                                    <td className="py-2 px-2 md:px-4">
+                                                        <input 
+                                                            type="number" min="0" max="100" inputMode="numeric"
+                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-center font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition"
+                                                            value={getGradeValue(student, selectedSubject, 'PH1')}
+                                                            onChange={(e) => handleGradeChange(student, 'PH1', e.target.value)}
+                                                            placeholder="-"
+                                                        />
+                                                    </td>
+                                                    <td className="py-2 px-2 md:px-4">
+                                                        <input 
+                                                            type="number" min="0" max="100" inputMode="numeric"
+                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-center font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition"
+                                                            value={getGradeValue(student, selectedSubject, 'PH2')}
+                                                            onChange={(e) => handleGradeChange(student, 'PH2', e.target.value)}
+                                                            placeholder="-"
+                                                        />
+                                                    </td>
+                                                    <td className="py-2 px-2 md:px-4">
+                                                        <input 
+                                                            type="number" min="0" max="100" inputMode="numeric"
+                                                            className="w-full bg-teal-50/50 border border-teal-200 rounded-lg px-2 py-2 text-center font-bold text-teal-900 focus:bg-white focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 transition"
+                                                            value={getGradeValue(student, selectedSubject, 'PTS')}
+                                                            onChange={(e) => handleGradeChange(student, 'PTS', e.target.value)}
+                                                            placeholder="-"
+                                                        />
+                                                    </td>
+                                                    <td className="py-2 px-2 md:px-4 text-center text-xs font-semibold">
+                                                        {(getGradeValue(student, selectedSubject, 'PH1') !== '' || getGradeValue(student, selectedSubject, 'PH2') !== '' || getGradeValue(student, selectedSubject, 'PTS') !== '') ? (
+                                                            <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">Terisi</span>
+                                                        ) : (
+                                                            <span className="text-slate-400">Kosong</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div className="p-6 bg-slate-50 border-t border-slate-200 flex flex-col items-center justify-center gap-3">
+                                    {savingStatus === 'no-url' && (
+                                        <p className="text-red-500 font-bold text-sm bg-red-50 px-4 py-2 rounded-lg border border-red-200 shadow-sm">
+                                            Gagal menyimpan: DEFAULT_SCRIPT_URL belum diatur.
+                                        </p>
+                                    )}
+                                    {savingStatus === 'error' && (
+                                        <p className="text-red-500 font-bold text-sm bg-red-50 px-4 py-2 rounded-lg border border-red-200 shadow-sm">
+                                            Gagal menyimpan: Terjadi kesalahan jaringan. Coba lagi.
+                                        </p>
+                                    )}
+                                    
+                                    <button 
+                                        onClick={handleSaveAll}
+                                        disabled={savingStatus === 'saving'}
+                                        className={`px-8 py-3.5 rounded-xl font-bold text-white shadow-lg transition-all flex items-center gap-2 ${
+                                            savingStatus === 'saving' 
+                                            ? 'bg-slate-400 cursor-not-allowed' 
+                                            : savingStatus === 'saved'
+                                            ? 'bg-green-500 hover:bg-green-600'
+                                            : 'bg-emerald-600 hover:bg-emerald-700 hover:shadow-xl hover:-translate-y-0.5'
+                                        }`}
+                                    >
+                                        <Icons.Check /> 
+                                        {savingStatus === 'saving' ? 'Menyimpan ke Spreadsheet...' : savingStatus === 'saved' ? 'Berhasil Disimpan!' : `Simpan Nilai ${selectedSubject}`}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+
+                            /* MODE MASTER REKAP ADMIN */
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="overflow-x-auto max-h-[75vh]">
+                                    <table className="w-max min-w-full text-xs md:text-sm text-center border-collapse">
+                                        <thead className="sticky top-0 z-30 shadow-md">
+                                            <tr>
+                                                <th rowSpan="2" className="border-b-2 border-r-2 border-slate-300 p-3 md:p-4 min-w-[220px] text-left sticky left-0 bg-slate-100 z-40 font-bold text-slate-800">
+                                                    NAMA SISWA
+                                                </th>
+                                                <th rowSpan="2" className="border-b-2 border-r-2 border-slate-300 p-2 min-w-[120px] bg-amber-50 text-slate-800 font-bold">
+                                                    RAPORT
+                                                </th>
+                                                {SUBJECTS.map((subject, idx) => (
+                                                    <th key={subject} colSpan="3" className={`border-b border-r-2 border-slate-300 p-2 font-bold text-slate-800 ${idx % 2 === 0 ? 'bg-slate-200' : 'bg-slate-100'}`}>
+                                                        {subject.toUpperCase()}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                            <tr>
+                                                {SUBJECTS.map((subject, idx) => (
+                                                    <Fragment key={subject + "-cols"}>
+                                                        <th className={`border-b-2 border-r border-slate-300 p-1.5 w-12 font-semibold text-slate-700 ${idx % 2 === 0 ? 'bg-slate-100' : 'bg-slate-50'}`}>PH 1</th>
+                                                        <th className={`border-b-2 border-r border-slate-300 p-1.5 w-12 font-semibold text-slate-700 ${idx % 2 === 0 ? 'bg-slate-100' : 'bg-slate-50'}`}>PH 2</th>
+                                                        <th className={`border-b-2 border-r-2 border-slate-300 p-1.5 w-12 font-bold text-emerald-800 ${idx % 2 === 0 ? 'bg-emerald-50' : 'bg-white'}`}>PTS</th>
+                                                    </Fragment>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {STUDENTS.map((student, rowIdx) => (
+                                                <tr key={student} className="hover:bg-amber-50 transition-colors">
+                                                    <td className={`border-b border-r-2 border-slate-200 p-2.5 text-left sticky left-0 z-20 font-semibold ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                                                        {student}
+                                                    </td>
+                                                    <td className="border-b border-r-2 border-slate-200 p-1 text-center bg-amber-50/50">
+                                                        <button 
+                                                            onClick={() => setSelectedStudentForPrint(student)}
+                                                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-md text-xs transition inline-flex items-center gap-1 shadow-sm"
+                                                        >
+                                                            <Icons.Printer /> Cetak
+                                                        </button>
+                                                    </td>
+                                                    {SUBJECTS.map((subject) => {
+                                                        const ph1 = getGradeValue(student, subject, 'PH1');
+                                                        const ph2 = getGradeValue(student, subject, 'PH2');
+                                                        const pts = getGradeValue(student, subject, 'PTS');
+                                                        return (
+                                                            <Fragment key={subject + "-" + student}>
+                                                                <td className="border-b border-r border-slate-200 p-1.5 text-slate-700">{ph1 !== '' ? ph1 : '-'}</td>
+                                                                <td className="border-b border-r border-slate-200 p-1.5 text-slate-700">{ph2 !== '' ? ph2 : '-'}</td>
+                                                                <td className="border-b border-r-2 border-slate-200 p-1.5 font-bold text-emerald-800 bg-emerald-50/30">{pts !== '' ? pts : '-'}</td>
+                                                            </Fragment>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {}
+                    {selectedStudentForPrint && (
+                        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-2 md:p-6 overflow-y-auto">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden my-auto flex flex-col max-h-[95vh]">
+                                
+                                {/* Modal Top Bar */}
+                                <div className="no-print bg-slate-800 p-4 text-white flex justify-between items-center shrink-0">
+                                    <div className="flex items-center gap-2 font-bold">
+                                        <Icons.Printer /> Pratinjau Raport Siswa
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={() => window.print()} 
+                                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold text-sm flex items-center gap-2 transition shadow"
+                                        >
+                                            <Icons.Printer /> Cetak / Simpan PDF
+                                        </button>
+                                        <button 
+                                            onClick={() => setSelectedStudentForPrint(null)}
+                                            className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-slate-700 transition"
+                                        >
+                                            <Icons.X />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Panel Upload Logo (Akan tersembunyi saat dicetak) */}
+                                <div className="no-print bg-slate-100 p-3.5 border-b border-slate-200 text-xs font-sans flex flex-wrap items-center justify-between gap-3 shrink-0">
+                                    <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                                        <span>Ganti Logo Kop Raport:</span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        {/* Upload Logo Pemda (Kiri) */}
+                                        <label className="cursor-pointer bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 shadow-sm transition">
+                                            <Icons.Upload />
+                                            <span>Logo Kota (Kiri)</span>
+                                            <input 
+                                                type="file" 
+                                                accept="image/*" 
+                                                className="hidden" 
+                                                onChange={(e) => handleImageUpload(e, setLogoKotaUrl)}
+                                            />
+                                        </label>
+
+                                        {/* Upload Logo Sekolah (Kanan) */}
+                                        <label className="cursor-pointer bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 shadow-sm transition">
+                                            <Icons.Upload />
+                                            <span>Logo Sekolah (Kanan)</span>
+                                            <input 
+                                                type="file" 
+                                                accept="image/*" 
+                                                className="hidden" 
+                                                onChange={(e) => handleImageUpload(e, setLogoSekolahUrl)}
+                                            />
+                                        </label>
+
+                                        {(logoKotaUrl || logoSekolahUrl) && (
+                                            <button 
+                                                onClick={() => {
+                                                    setLogoKotaUrl(null);
+                                                    setLogoSekolahUrl(null);
+                                                }}
+                                                className="text-red-600 hover:underline font-semibold"
+                                            >
+                                                Reset Logo Default
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Modal Body - Blanko Resmi Cetak */}
+                                <div className="p-8 overflow-y-auto flex-1 bg-white text-slate-900 font-serif leading-tight" id="print-area">
+                                    
+                                    {/* KOP SURAT */}
+                                    <div className="flex items-center justify-between border-b-4 border-double border-black pb-3 mb-4">
+                                        {/* Logo Kiri / Kota Pemda */}
+                                        <div className="w-20 h-20 flex items-center justify-center">
+                                            {logoKotaUrl ? (
+                                                <img src={logoKotaUrl} alt="Logo Kota" className="max-w-full max-h-full object-contain" />
+                                            ) : (
+                                                <svg viewBox="0 0 100 100" className="w-16 h-16">
+                                                    <path d="M50 5 L85 20 L85 70 L50 95 L15 70 L15 20 Z" fill="#FACC15" stroke="#000" strokeWidth="2"/>
+                                                    <text x="50" y="30" fontSize="8" textAnchor="middle" fontWeight="bold" fill="#000">KOTA</text>
+                                                    <text x="50" y="85" fontSize="7" textAnchor="middle" fontWeight="bold" fill="#000">BANDAR LAMPUNG</text>
+                                                    <path d="M30 45 Q50 35 70 45 L65 65 Q50 75 35 65 Z" fill="#DC2626" stroke="#000" strokeWidth="1"/>
+                                                </svg>
+                                            )}
+                                        </div>
+
+                                        {/* Teks Identitas Sekolah */}
+                                        <div className="text-center flex-1 px-2 font-sans">
+                                            <h3 className="text-sm font-bold tracking-wide uppercase">DINAS PENDIDIKAN DAN KEBUDAYAAN</h3>
+                                            <h1 className="text-xl font-extrabold uppercase tracking-wide my-0.5">SMP NEGERI 38 BANDAR LAMPUNG</h1>
+                                            <p className="text-xs">Jl. Ikan Sembilang No. 16 Sukaraja - Bumi Waras Kode Pos. 35226</p>
+                                            <p className="text-xs font-bold tracking-widest mt-0.5">BANDAR LAMPUNG</p>
+                                        </div>
+
+                                        {/* Logo Kanan / Sekolah */}
+                                        <div className="w-20 h-20 flex items-center justify-center">
+                                            {logoSekolahUrl ? (
+                                                <img src={logoSekolahUrl} alt="Logo Sekolah" className="max-w-full max-h-full object-contain" />
+                                            ) : (
+                                                <svg viewBox="0 0 100 100" className="w-16 h-16">
+                                                    <path d="M50 5 L88 20 L88 75 L50 95 L12 75 L12 20 Z" fill="#3B82F6" stroke="#000" strokeWidth="2"/>
+                                                    <path d="M20 25 L80 25 L80 70 L20 70 Z" fill="#FFF" stroke="#000" strokeWidth="1"/>
+                                                    <text x="50" y="42" fontSize="9" textAnchor="middle" fontWeight="bold" fill="#000">SMP NEGERI</text>
+                                                    <text x="50" y="55" fontSize="16" textAnchor="middle" fontWeight="bold" fill="#000">38</text>
+                                                </svg>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* JUDUL RAPORT */}
+                                    <div className="text-center font-sans my-4">
+                                        <h2 className="text-sm font-bold uppercase tracking-wide">LAPORAN HASIL PEMBELAJARAN SUMATIF TENGAH SEMESTER GANJIL</h2>
+                                        <h3 className="text-sm font-bold uppercase tracking-wide mt-0.5">TAHUN PELAJARAN 2026/2027</h3>
+                                    </div>
+
+                                    {/* IDENTITAS SISWA */}
+                                    <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs font-sans mb-4 border-b border-black pb-3">
+                                        <div className="flex">
+                                            <span className="w-28 font-semibold">Nama Siswa</span>
+                                            <span>: <strong className="uppercase">{selectedStudentForPrint}</strong></span>
+                                        </div>
+                                        <div className="flex">
+                                            <span className="w-24 font-semibold">Kelas</span>
+                                            <span>: 9C</span>
+                                        </div>
+                                        <div className="flex">
+                                            <span className="w-28 font-semibold">NISN</span>
+                                            <span>: -</span>
+                                        </div>
+                                        <div className="flex">
+                                            <span className="w-24 font-semibold">Semester</span>
+                                            <span>: Ganjil</span>
+                                        </div>
+                                    </div>
+
+                                    {/* TABEL NILAI MAPEL */}
+                                    <table className="w-full text-xs font-sans border-collapse border border-black mb-4">
+                                        <thead>
+                                            <tr className="bg-slate-100 text-center font-bold border-b border-black">
+                                                <th className="border border-black p-2 w-8">NO</th>
+                                                <th className="border border-black p-2 text-left">MATA PELAJARAN</th>
+                                                <th className="border border-black p-2 w-28">PENILAIAN HARIAN 1</th>
+                                                <th className="border border-black p-2 w-28">PENILAIAN HARIAN 2</th>
+                                                <th className="border border-black p-2 w-32">PENILAIAN TENGAH SEMESTER</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {OFFICIAL_SUBJECT_MAP.map((item, idx) => {
+                                                if (item.isHeader) {
+                                                    return (
+                                                        <tr key={idx} className="font-bold bg-slate-50">
+                                                            <td className="border border-black p-1.5 text-center">{item.no}</td>
+                                                            <td colSpan="4" className="border border-black p-1.5 text-left">{item.label}</td>
+                                                        </tr>
+                                                    );
+                                                }
+
+                                                const ph1 = getGradeValue(selectedStudentForPrint, item.key, 'PH1');
+                                                const ph2 = getGradeValue(selectedStudentForPrint, item.key, 'PH2');
+                                                const pts = getGradeValue(selectedStudentForPrint, item.key, 'PTS');
+
+                                                return (
+                                                    <tr key={idx} className="border-b border-black text-center">
+                                                        <td className="border border-black p-1.5">{item.no}</td>
+                                                        <td className={`border border-black p-1.5 text-left ${item.isSub ? 'pl-6' : 'font-medium'}`}>{item.label}</td>
+                                                        <td className="border border-black p-1.5">{ph1 !== '' ? ph1 : ''}</td>
+                                                        <td className="border border-black p-1.5">{ph2 !== '' ? ph2 : ''}</td>
+                                                        <td className="border border-black p-1.5">{pts !== '' ? pts : ''}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+
+                                    {/* TABEL KEHADIRAN (INTERAKTIF & AUTO-CALCULATED) */}
+                                    <div className="w-1/2 font-sans text-xs mb-6">
+                                        <p className="font-bold mb-1">Kehadiran</p>
+                                        <table className="w-full text-center border-collapse border border-black">
+                                            <thead>
+                                                <tr className="bg-slate-100 font-bold">
+                                                    <th className="border border-black p-1">Sakit</th>
+                                                    <th className="border border-black p-1">Ijin</th>
+                                                    <th className="border border-black p-1">Alpa</th>
+                                                    <th className="border border-black p-1 bg-slate-200">Jumlah</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    {/* Input Sakit */}
+                                                    <td className="border border-black p-0">
+                                                        <input 
+                                                            type="number" 
+                                                            min="0"
+                                                            className="w-full text-center py-1.5 focus:bg-amber-50 focus:outline-none print-input font-medium"
+                                                            value={getAttendanceValue(selectedStudentForPrint, 'sakit')}
+                                                            onChange={(e) => handleAttendanceChange(selectedStudentForPrint, 'sakit', e.target.value)}
+                                                            placeholder="-"
+                                                        />
+                                                    </td>
+
+                                                    {/* Input Izin */}
+                                                    <td className="border border-black p-0">
+                                                        <input 
+                                                            type="number" 
+                                                            min="0"
+                                                            className="w-full text-center py-1.5 focus:bg-amber-50 focus:outline-none print-input font-medium"
+                                                            value={getAttendanceValue(selectedStudentForPrint, 'izin')}
+                                                            onChange={(e) => handleAttendanceChange(selectedStudentForPrint, 'izin', e.target.value)}
+                                                            placeholder="-"
+                                                        />
+                                                    </td>
+
+                                                    {/* Input Alpa */}
+                                                    <td className="border border-black p-0">
+                                                        <input 
+                                                            type="number" 
+                                                            min="0"
+                                                            className="w-full text-center py-1.5 focus:bg-amber-50 focus:outline-none print-input font-medium"
+                                                            value={getAttendanceValue(selectedStudentForPrint, 'alpa')}
+                                                            onChange={(e) => handleAttendanceChange(selectedStudentForPrint, 'alpa', e.target.value)}
+                                                            placeholder="-"
+                                                        />
+                                                    </td>
+
+                                                    {/* Jumlah Otomatis */}
+                                                    <td className="border border-black p-1.5 font-bold bg-slate-50">
+                                                        {(() => {
+                                                            const s = Number(getAttendanceValue(selectedStudentForPrint, 'sakit')) || 0;
+                                                            const i = Number(getAttendanceValue(selectedStudentForPrint, 'izin')) || 0;
+                                                            const a = Number(getAttendanceValue(selectedStudentForPrint, 'alpa')) || 0;
+                                                            const total = s + i + a;
+                                                            return total > 0 ? `${total} hari` : '-';
+                                                        })()}
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* TANDA TANGAN */}
+                                    <div className="font-sans text-xs mt-8 pt-2">
+                                        <p className="text-right mb-4">Bandar Lampung, 9 Oktober 2026</p>
+                                        <div className="grid grid-cols-2 gap-8 text-center">
+                                            <div>
+                                                <p className="mb-1">Mengetahui</p>
+                                                <p className="mb-16">Orang Tua Siswa</p>
+                                                <p className="font-bold underline">….................................................</p>
+                                            </div>
+                                            <div>
+                                                <p className="mb-1">&nbsp;</p>
+                                                <p className="mb-16">Wali Kelas 9C</p>
+                                                <p className="font-bold underline">As’ad Rizki As-shidiqi, M.Pd., Gr.</p>
+                                                <p className="text-slate-700">NIP 199806132025211096</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {showAuthModal && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+                                <div className="bg-emerald-600 p-5 text-center">
+                                    <div className="mx-auto bg-white/20 w-12 h-12 rounded-full flex items-center justify-center text-white mb-3">
+                                        <Icons.Lock />
+                                    </div>
+                                    <h3 className="text-white font-extrabold text-xl">Akses Wali Kelas / Admin</h3>
+                                    <p className="text-emerald-100 text-sm mt-1">Masukkan password untuk melihat Master Rekap</p>
+                                </div>
+                                <form onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (passwordInput === PASSWORD_ADMIN) {
+                                        setIsAdminMode(true);
+                                        setShowAuthModal(false);
+                                        setPasswordInput('');
+                                        setPasswordError('');
+                                    } else {
+                                        setPasswordError('Password salah! Silakan coba lagi.');
+                                    }
+                                }} className="p-6">
+                                    <div className="mb-5">
+                                        <input 
+                                            type="password"
+                                            autoFocus
+                                            className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition text-center text-lg tracking-widest font-mono text-slate-800"
+                                            value={passwordInput}
+                                            onChange={(e) => {
+                                                setPasswordInput(e.target.value);
+                                                setPasswordError('');
+                                            }}
+                                            placeholder="••••••••"
+                                        />
+                                        {passwordError && (
+                                            <p className="mt-3 text-sm text-red-600 font-bold text-center bg-red-50 py-2 px-3 rounded-lg border border-red-100">
+                                                {passwordError}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button 
+                                            type="button"
+                                            onClick={() => {
+                                                setShowAuthModal(false);
+                                                setPasswordInput('');
+                                                setPasswordError('');
+                                            }}
+                                            className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition"
+                                        >
+                                            Batal
+                                        </button>
+                                        <button 
+                                            type="submit"
+                                            className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition shadow-lg shadow-emerald-600/30"
+                                        >
+                                            Buka Akses
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
